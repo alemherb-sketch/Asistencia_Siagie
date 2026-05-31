@@ -1,11 +1,13 @@
 # Usa una imagen base de Node.js
 FROM node:20-bullseye
 
-# Instalar Python
+# Instalar Python y Tesseract OCR
 RUN apt-get update && apt-get install -y \
     python3 \
     python3-pip \
     python3-venv \
+    tesseract-ocr \
+    tesseract-ocr-spa \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

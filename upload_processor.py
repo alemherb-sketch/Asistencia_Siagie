@@ -76,107 +76,146 @@ def map_attendance(val):
     mapping = {"P": ".", "FI": "F", "F": "F", "FJ": "J", "TI": "T", "T": "T", "TJ": "U", "U": "U", ".": "."}
     return mapping.get(val, val)
 
-def parse_generic_file(filepath, ext, student_norms):
+def process_table_data(table, student_norms):
+    """
+    Procesa una tabla (lista de listas) y extrae datos de asistencia.
+    Función independiente reutilizable por parse_generic_file e image_processor.
+    
+    Returns: (att_data, extra_students)
+    """
     att_data = {}
     extra_students = []
     
-    def process_table(table):
-        header_row_idx = -1
-        day_cols = {}
-        for r_idx, row in enumerate(table):
-            nums_found = 0
-            temp_cols = {}
-            for c_idx, cell in enumerate(row):
-                cell_str = str(cell).strip() if cell is not None else ""
-                m = re.search(r'\b(0?[1-9]|[12]\d|3[01])\b', cell_str)
-                if m:
-                    m_time = re.search(r'(\d{1,2}):(\d{2})', cell_str)
-                    if m_time:
-                        hour = int(m_time.group(1))
-                        if hour >= 12:
-                            continue
-                            
-                    day = m.group(1).zfill(2)
-                    temp_cols[c_idx] = day
-                    nums_found += 1
-            if nums_found >= 5:
-                header_row_idx = r_idx
-                day_cols = temp_cols
-                break
-                
-        if header_row_idx != -1:
-            for r_idx in range(header_row_idx + 1, len(table)):
-                row = table[r_idx]
-                row_str = " ".join([str(c) for c in row if c])
-                row_norm = normalize_name(row_str)
-                
-                if len(row_norm) < 10 or ',' not in row_str:
-                    continue # Saltar filas que no parecen nombres
-                
-                best_match = None
-                
-                # Pasada 1: Coincidencia exacta
+    header_row_idx = -1
+    day_cols = {}
+    for r_idx, row in enumerate(table):
+        nums_found = 0
+        temp_cols = {}
+        for c_idx, cell in enumerate(row):
+            cell_str = str(cell).strip() if cell is not None else ""
+            m = re.search(r'\b(0?[1-9]|[12]\d|3[01])\b', cell_str)
+            if m:
+                m_time = re.search(r'(\d{1,2}):(\d{2})', cell_str)
+                if m_time:
+                    hour = int(m_time.group(1))
+                    if hour >= 12:
+                        continue
+                        
+                day = m.group(1).zfill(2)
+                temp_cols[c_idx] = day
+                nums_found += 1
+        if nums_found >= 5:
+            header_row_idx = r_idx
+            day_cols = temp_cols
+            break
+            
+    if header_row_idx != -1:
+        for r_idx in range(header_row_idx + 1, len(table)):
+            row = table[r_idx]
+            row_str = " ".join([str(c) for c in row if c])
+            row_norm = normalize_name(row_str)
+            
+            if len(row_norm) < 10 or ',' not in row_str:
+                continue # Saltar filas que no parecen nombres
+            
+            best_match = None
+            
+            # Pasada 1: Coincidencia exacta
+            for s_norm in student_norms:
+                if s_norm in row_norm:
+                    best_match = s_norm
+                    break
+            
+            # Pasada 2: Coincidencia parcial (fuzzy) al mejor postor
+            if not best_match:
+                best_score = 0
                 for s_norm in student_norms:
-                    if s_norm in row_norm:
-                        best_match = s_norm
-                        break
-                
-                # Pasada 2: Coincidencia parcial (fuzzy) al mejor postor
-                if not best_match:
-                    best_score = 0
-                    for s_norm in student_norms:
-                        parts = s_norm.replace(',', '').split()
-                        valid_parts = [p for p in parts if len(p) > 2]
-                        if not valid_parts: continue
-                        
-                        matches = sum(1 for p in valid_parts if p in row_norm)
-                        score = matches / len(valid_parts)
-                        
-                        # Exigir al menos 2 coincidencias y un score > 0.5
-                        if matches >= 2 and score > 0.5 and score > best_score:
-                            best_score = score
-                            best_match = s_norm
-                            
-                if best_match:
-                    s_norm = best_match
-                    if s_norm not in att_data:
-                        att_data[s_norm] = {}
-                    for c_idx, day_str in day_cols.items():
-                        if c_idx < len(row):
-                            val = row[c_idx]
-                            if val:
-                                att_data[s_norm][day_str] = map_attendance(str(val))
-                        
-                else:
-                    # Verificar si la fila tiene alguna marca de asistencia
-                    has_att = False
-                    for c_idx in day_cols:
-                        if c_idx < len(row) and row[c_idx]:
-                            mapped = map_attendance(str(row[c_idx]))
-                            if mapped in ['.', 'F', 'T', 'J', 'U']:
-                                has_att = True
-                                break
+                    parts = s_norm.replace(',', '').split()
+                    valid_parts = [p for p in parts if len(p) > 2]
+                    if not valid_parts: continue
                     
-                    if has_att:
-                        m_name = re.search(r'([A-ZÑÁÉÍÓÚ]+[A-ZÑÁÉÍÓÚ\s]*,\s*[A-ZÑÁÉÍÓÚ\s]+)', row_str.upper())
-                        extra_name = m_name.group(1).strip() if m_name else row_str.strip()
-                        if not any(s['name'] == extra_name for s in extra_students):
-                            extra_students.append({"name": extra_name, "ngs": "EN ASISTENCIA, NO EN SIAGIE"})
+                    matches = sum(1 for p in valid_parts if p in row_norm)
+                    score = matches / len(valid_parts)
+                    
+                    # Exigir al menos 2 coincidencias y un score > 0.5
+                    if matches >= 2 and score > 0.5 and score > best_score:
+                        best_score = score
+                        best_match = s_norm
+                        
+            if best_match:
+                s_norm = best_match
+                if s_norm not in att_data:
+                    att_data[s_norm] = {}
+                for c_idx, day_str in day_cols.items():
+                    if c_idx < len(row):
+                        val = row[c_idx]
+                        if val:
+                            att_data[s_norm][day_str] = map_attendance(str(val))
+                    
+            else:
+                # Verificar si la fila tiene alguna marca de asistencia
+                has_att = False
+                for c_idx in day_cols:
+                    if c_idx < len(row) and row[c_idx]:
+                        mapped = map_attendance(str(row[c_idx]))
+                        if mapped in ['.', 'F', 'T', 'J', 'U']:
+                            has_att = True
+                            break
+                
+                if has_att:
+                    m_name = re.search(r'([A-ZÑÁÉÍÓÚ]+[A-ZÑÁÉÍÓÚ\s]*,\s*[A-ZÑÁÉÍÓÚ\s]+)', row_str.upper())
+                    extra_name = m_name.group(1).strip() if m_name else row_str.strip()
+                    if not any(s['name'] == extra_name for s in extra_students):
+                        extra_students.append({"name": extra_name, "ngs": "EN ASISTENCIA, NO EN SIAGIE"})
 
+    return att_data, extra_students
+
+
+IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.bmp', '.webp')
+
+
+def parse_generic_file(filepath, ext, student_norms):
+    """Parsea un archivo de asistencia (PDF, Excel o Imagen) y extrae datos."""
+    tables = []
+    
     if ext == '.pdf':
         with pdfplumber.open(filepath) as pdf:
             for page in pdf.pages:
                 for table in page.extract_tables():
-                    process_table(table)
+                    tables.append(table)
+    elif ext in IMAGE_EXTENSIONS:
+        try:
+            from image_processor import image_to_table
+            table = image_to_table(filepath)
+            if table:
+                tables.append(table)
+        except ImportError:
+            print(f"[WARN] Módulo image_processor no disponible. No se puede procesar {filepath}")
+        except Exception as e:
+            print(f"Error procesando imagen {filepath}: {e}")
     else:
         try:
             df = pd.read_excel(filepath, header=None)
             table = df.fillna("").values.tolist()
-            process_table(table)
+            tables.append(table)
         except Exception as e:
             print(f"Error reading excel {filepath}: {e}")
-            
-    return att_data, extra_students
+    
+    # Procesar todas las tablas y fusionar resultados
+    all_att_data = {}
+    all_extra = []
+    
+    for table in tables:
+        att_data, extra = process_table_data(table, student_norms)
+        for key, val in att_data.items():
+            if key not in all_att_data:
+                all_att_data[key] = {}
+            all_att_data[key].update(val)
+        for ex in extra:
+            if not any(s['name'] == ex['name'] for s in all_extra):
+                all_extra.append(ex)
+    
+    return all_att_data, all_extra
 
 def generate_month_days(year, month):
     weekdays = ["L", "M", "X", "J", "V", "S", "D"]
@@ -237,7 +276,7 @@ def process_uploads_logic(siagie_paths, att_paths):
     
     for att_path in att_paths:
         ext = os.path.splitext(att_path)[1].lower()
-        if ext in ['.pdf', '.xls', '.xlsx']:
+        if ext in ['.pdf', '.xls', '.xlsx'] or ext in IMAGE_EXTENSIONS:
             att_data, extra_students = parse_generic_file(att_path, ext, student_norms)
             for s_norm, data in att_data.items():
                 if s_norm not in all_att_data:
