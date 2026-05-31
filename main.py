@@ -46,22 +46,28 @@ async def process_uploads(
     siagie: List[UploadFile] = File(...),
     attendances: List[UploadFile] = File(...)
 ):
-    # Crear directorio temporal para procesar los archivos
-    with tempfile.TemporaryDirectory() as temp_dir:
-        siagie_paths = []
-        for s_file in siagie:
-            s_path = os.path.join(temp_dir, s_file.filename)
-            with open(s_path, "wb") as buffer:
-                shutil.copyfileobj(s_file.file, buffer)
-            siagie_paths.append(s_path)
-            
-        att_paths = []
-        for att_file in attendances:
-            att_path = os.path.join(temp_dir, att_file.filename)
-            with open(att_path, "wb") as buffer:
-                shutil.copyfileobj(att_file.file, buffer)
-            att_paths.append(att_path)
-            
-        # Procesar usando la nueva lógica
-        result = process_uploads_logic(siagie_paths, att_paths)
-        return result
+    import traceback
+    try:
+        # Crear directorio temporal para procesar los archivos
+        with tempfile.TemporaryDirectory() as temp_dir:
+            siagie_paths = []
+            for s_file in siagie:
+                s_path = os.path.join(temp_dir, s_file.filename)
+                with open(s_path, "wb") as buffer:
+                    shutil.copyfileobj(s_file.file, buffer)
+                siagie_paths.append(s_path)
+                
+            att_paths = []
+            for att_file in attendances:
+                att_path = os.path.join(temp_dir, att_file.filename)
+                with open(att_path, "wb") as buffer:
+                    shutil.copyfileobj(att_file.file, buffer)
+                att_paths.append(att_path)
+                
+            # Procesar usando la nueva lógica
+            result = process_uploads_logic(siagie_paths, att_paths)
+            return result
+    except Exception as e:
+        error_detail = traceback.format_exc()
+        print(f"[ERROR] process_uploads failed:\n{error_detail}")
+        return {"error": f"Error procesando archivos: {str(e)}"}
