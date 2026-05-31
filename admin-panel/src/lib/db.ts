@@ -1,46 +1,92 @@
 import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
 import path from 'path';
-
-// Ruta al archivo SQLite
-const dbPath = path.join(process.cwd(), 'database.sqlite');
+import { Pool } from 'pg';
 
 let dbInstance: any = null;
+let pgPool: Pool | null = null;
+const usePg = !!process.env.DATABASE_URL;
+
+class DbWrapper {
+  constructor(private sqliteDb: any, private pgDb: Pool | null) {}
+
+  private replacePlaceholders(query: string) {
+    if (!this.pgDb) return query;
+    let i = 1;
+    return query.replace(/\?/g, () => `$${i++}`);
+  }
+
+  async get(query: string, params: any[] = []) {
+    if (this.pgDb) {
+      const res = await this.pgDb.query(this.replacePlaceholders(query), params);
+      return res.rows[0] || null;
+    } else {
+      return this.sqliteDb.get(query, params);
+    }
+  }
+
+  async all(query: string, params: any[] = []) {
+    if (this.pgDb) {
+      const res = await this.pgDb.query(this.replacePlaceholders(query), params);
+      return res.rows;
+    } else {
+      return this.sqliteDb.all(query, params);
+    }
+  }
+
+  async run(query: string, params: any[] = []) {
+    if (this.pgDb) {
+      await this.pgDb.query(this.replacePlaceholders(query), params);
+      return { lastID: null, changes: null };
+    } else {
+      return this.sqliteDb.run(query, params);
+    }
+  }
+}
 
 export async function getDb() {
   if (!dbInstance) {
-    dbInstance = await open({
-      filename: dbPath,
-      driver: sqlite3.Database,
-    });
-    await initDbTables(dbInstance);
+    if (usePg) {
+      pgPool = new Pool({
+        connectionString: process.env.DATABASE_URL,
+        ssl: { rejectUnauthorized: false }
+      });
+      dbInstance = new DbWrapper(null, pgPool);
+      await initDbTables(dbInstance, true);
+    } else {
+      const dbPath = path.join(process.cwd(), 'database.sqlite');
+      const sqliteDb = await open({
+        filename: dbPath,
+        driver: sqlite3.Database,
+      });
+      dbInstance = new DbWrapper(sqliteDb, null);
+      await initDbTables(dbInstance, false);
+    }
   }
   return dbInstance;
 }
 
-async function initDbTables(db: any) {
+async function initDbTables(db: DbWrapper, isPg: boolean) {
+  const idType = isPg ? 'SERIAL PRIMARY KEY' : 'INTEGER PRIMARY KEY AUTOINCREMENT';
   
-  await db.exec(`
+  await db.run(`
     CREATE TABLE IF NOT EXISTS users (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL,
-      email TEXT UNIQUE NOT NULL,
+      id ${idType},
+      name VARCHAR(255) NOT NULL,
+      email VARCHAR(255) UNIQUE NOT NULL,
       password TEXT NOT NULL,
-      startDate TEXT NOT NULL,
-      endDate TEXT NOT NULL,
-      role TEXT DEFAULT 'user'
+      startDate VARCHAR(255) NOT NULL,
+      endDate VARCHAR(255) NOT NULL,
+      role VARCHAR(50) DEFAULT 'user'
     );
   `);
   
-  // Create default admin user if none exists
   const admin = await db.get(`SELECT id FROM users WHERE role = 'admin'`);
   if (!admin) {
-    // Admin default password is 'admin123' (we will hash this later, using bcryptjs, but for now we just import it when the server starts)
     const bcrypt = require('bcryptjs');
     const salt = await bcrypt.genSalt(10);
     const hash = await bcrypt.hash('admin123', salt);
     
-    // Admin has 100 years of validity
     const startDate = new Date().toISOString();
     const endDate = new Date(Date.now() + 100 * 365 * 24 * 60 * 60 * 1000).toISOString();
     

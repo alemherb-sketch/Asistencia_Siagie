@@ -57,9 +57,7 @@ export default function UserDashboard() {
 
           <div style={{ marginTop: '2rem' }}>
             <a 
-              href="http://localhost:8000" 
-              target="_blank"
-              rel="noopener noreferrer"
+              href="/asistencia/" 
               className="btn btn-primary" 
               style={{ width: '100%', padding: '1rem', fontSize: '1.1rem', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '0.5rem' }}
             >
