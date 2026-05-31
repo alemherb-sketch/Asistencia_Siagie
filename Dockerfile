@@ -39,7 +39,7 @@ RUN echo '#!/bin/bash\n\
 uvicorn main:app --host 127.0.0.1 --port 8000 &\n\
 \n\
 # Iniciar Next.js en primer plano en el puerto provisto por Render\n\
-cd admin-panel && npm start -p ${PORT:-10000}\n\
+cd admin-panel && npx next start -p ${PORT:-10000}\n\
 ' > /app/start-all.sh
 RUN chmod +x /app/start-all.sh
 
