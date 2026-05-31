@@ -1,6 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  serverExternalPackages: ['sqlite3', 'pg', 'bcryptjs'],
   async rewrites() {
     return [
       {

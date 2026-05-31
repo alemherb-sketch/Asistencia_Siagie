@@ -3,6 +3,8 @@ import { getDb } from '@/lib/db';
 import { requireAdmin } from '@/lib/auth';
 import bcrypt from 'bcryptjs';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET() {
   const authError = await requireAdmin();
   if (authError) return authError;
