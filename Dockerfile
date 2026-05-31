@@ -23,7 +23,7 @@ COPY frontend/ ./frontend/
 
 # ---- NEXT.JS SETUP ----
 WORKDIR /app/admin-panel
-COPY admin-panel/package*.json ./
+COPY admin-panel/package.json ./
 RUN npm install
 
 # Copiar el panel
