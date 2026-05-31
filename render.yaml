@@ -2,14 +2,3 @@ services:
   - type: web
     name: asistencia-siagie
     env: docker
-    envVars:
-      - key: DATABASE_URL
-        fromDatabase:
-          name: asistencia-db
-          property: connectionString
-
-databases:
-  - name: asistencia-db
-    databaseName: asistenciadb
-    user: admin
-    plan: free
