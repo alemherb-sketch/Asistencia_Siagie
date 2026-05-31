@@ -1,14 +1,11 @@
-import sqlite3 from 'sqlite3';
-import { open } from 'sqlite';
 import path from 'path';
-import { Pool } from 'pg';
 
 let dbInstance: any = null;
-let pgPool: Pool | null = null;
+let pgPool: any = null;
 const usePg = !!process.env.DATABASE_URL;
 
 class DbWrapper {
-  constructor(private sqliteDb: any, private pgDb: Pool | null) {}
+  constructor(private sqliteDb: any, private pgDb: any) {}
 
   private replacePlaceholders(query: string) {
     if (!this.pgDb) return query;
@@ -47,6 +44,7 @@ class DbWrapper {
 export async function getDb() {
   if (!dbInstance) {
     if (usePg) {
+      const { Pool } = require('pg');
       pgPool = new Pool({
         connectionString: process.env.DATABASE_URL,
         ssl: { rejectUnauthorized: false }
@@ -54,6 +52,8 @@ export async function getDb() {
       dbInstance = new DbWrapper(null, pgPool);
       await initDbTables(dbInstance, true);
     } else {
+      const sqlite3 = require('sqlite3');
+      const { open } = require('sqlite');
       const dbPath = path.join(process.cwd(), 'database.sqlite');
       const sqliteDb = await open({
         filename: dbPath,
