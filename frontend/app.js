@@ -61,7 +61,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 formData.append("attendances", attInput.files[i]);
             }
 
-            const response = await fetch('api/process_uploads', {
+            const response = await fetch('/asistencia/api/process_uploads', {
                 method: 'POST',
                 body: formData
             });
