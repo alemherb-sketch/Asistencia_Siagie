@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sistema de Control de Asistencia</title>
+    <link rel="stylesheet" href="/static/style.css?v=2">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="app-container">
+        <header>
+            <h1>Control de Asistencia</h1>
+            
+            <div class="filters fade-in" id="filters-container" style="display: none;">
+                <div class="filter-group">
+                    <label>Nivel</label>
+                    <select id="nivel-filter">
+                        <option value="TODOS">TODOS</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label>Grado</label>
+                    <select id="grado-filter">
+                        <option value="TODOS">TODOS</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label>Sección</label>
+                    <select id="seccion-filter">
+                        <option value="TODOS">TODOS</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="filters">
+                <div class="filter-group">
+                    <label>1. IMPORTAR PDF SIAGIE (Varias secciones):</label>
+                    <input type="file" id="siagie-file" accept=".pdf" class="file-input" multiple>
+                </div>
+                <div class="filter-group">
+                    <label>2. IMPORTAR ARCHIVOS ASISTENCIAS:</label>
+                    <input type="file" id="att-files" accept=".xls,.xlsx,.pdf" multiple class="file-input">
+                </div>
+                <button id="btn-process" class="btn-primary">Procesar Todo</button>
+            </div>
+        </header>
+
+        <main>
+            <div id="summary-container" class="summary-container hidden fade-in" style="text-align: center; margin-bottom: 15px;">
+                <h2 id="detected-grade" style="color: #60a5fa; margin-bottom: 10px;">Grado: - | Sección: -</h2>
+                <p style="font-weight: 600; font-size: 1.1em;">Total de alumnos: <span id="total-students">0</span> <span id="student-details" style="font-size: 0.9em; color: #666; font-weight: normal;"></span></p>
+            </div>
+            <div id="loader" class="loader hidden">Cargando datos...</div>
+            <div id="error-message" class="error-message hidden"></div>
+            
+            <div class="table-container fade-in">
+                <table id="attendance-table" class="hidden">
+                    <thead>
+                        <tr id="table-header">
+                            <!-- Headers dinámicos aquí -->
+                        </tr>
+                    </thead>
+                    <tbody id="table-body">
+                        <!-- Filas dinámicas aquí -->
+                    </tbody>
+                    <tfoot id="table-footer">
+                        <tr id="table-footer-row">
+                            <!-- Headers dinámicos al final -->
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+
+            <div id="not-found-container" class="not-found-container hidden fade-in">
+                <h3>Alumnos con Discrepancias</h3>
+                <p>La siguiente tabla muestra alumnos faltantes o alumnos extra detectados en sus archivos.</p>
+                <table id="not-found-table">
+                    <thead>
+                        <tr>
+                            <th>Apellidos y Nombres</th>
+                            <th>Estado</th>
+                        </tr>
+                    </thead>
+                    <tbody id="not-found-body">
+                        <!-- Filas no encontrados aquí -->
+                    </tbody>
+                </table>
+            </div>
+        </main>
+    </div>
+    <script src="/static/app.js?v=6"></script>
+</body>
+</html>
