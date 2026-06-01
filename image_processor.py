@@ -228,7 +228,8 @@ def classify_cell(cell_gray, cell_w, cell_h):
 
     # ── Celda angosta con tinta → podría ser letra de asistencia o número ──
     if cell_w < 80:
-        text = _ocr_cell(cell_gray, psm=10, whitelist='FTJUP.0123456789MLXVSDB')
+        # psm=7 o psm=8 permite leer múltiples caracteres (ej: "12", "30") en lugar de forzar uno solo
+        text = _ocr_cell(cell_gray, psm=8, whitelist='FTJUP.0123456789MLXVSDB')
         text = text.strip().upper() if text else ""
 
         # Letras de asistencia reconocidas
