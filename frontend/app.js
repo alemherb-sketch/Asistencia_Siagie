@@ -94,7 +94,8 @@ document.addEventListener("DOMContentLoaded", () => {
             
             // Render detected grade overall
             const nivelText = data.nivel && data.nivel !== "DESCONOCIDO" ? `Nivel: ${data.nivel} | ` : "";
-            detectedGradeSpan.textContent = `${nivelText}Grado: ${data.grado} | Sección: ${data.seccion}`;
+            const monthText = data.month_name ? ` | Mes: ${data.month_name} ${data.year}` : "";
+            detectedGradeSpan.textContent = `${nivelText}Grado: ${data.grado} | Sección: ${data.seccion}${monthText}`;
             
             applyFilters();
             
@@ -153,7 +154,8 @@ document.addEventListener("DOMContentLoaded", () => {
         const displaySeccion = sFilter === "TODOS" ? globalData.seccion : sFilter;
         
         const nivelText = displayNivel && displayNivel !== "DESCONOCIDO" ? `Nivel: ${displayNivel} | ` : "";
-        detectedGradeSpan.textContent = `${nivelText}Grado: ${displayGrado} | Sección: ${displaySeccion}`;
+        const monthText = globalData.month_name ? ` | Mes: ${globalData.month_name} ${globalData.year}` : "";
+        detectedGradeSpan.textContent = `${nivelText}Grado: ${displayGrado} | Sección: ${displaySeccion}${monthText}`;
         
         const filteredResults = globalData.results.filter(s => {
             return (nFilter === "TODOS" || s.nivel === nFilter) &&

@@ -27,11 +27,16 @@ def extract_siagie_pdf(filepath):
     month_val, year_val = None, None
     students = []
     
+    MONTH_PATTERN = r'(ENERO|FEBRERO|MARZO|ABRIL|MAYO|JUNIO|JULIO|AGOSTO|SETIEMBRE|SEPTIEMBRE|OCTUBRE|NOVIEMBRE|DICIEMBRE)'
+    
     with pdfplumber.open(filepath) as pdf:
         current_seccion = "DESCONOCIDO"
+        full_text_pages = []  # Guardar texto de todas las páginas para búsqueda de mes
+        
         for page in pdf.pages:
             text = page.extract_text(x_tolerance=2, y_tolerance=3)
             if not text: continue
+            full_text_pages.append(text)
             
             if nivel == "DESCONOCIDO":
                 m = re.search(r'\b(INICIAL|PRIMARIA|SECUNDARIA)\b', text, re.IGNORECASE)
@@ -47,12 +52,6 @@ def extract_siagie_pdf(filepath):
             else:
                 m2_sec = re.search(r'\b(PRIMERO|SEGUNDO|TERCERO|CUARTO|QUINTO|SEXTO)\s+([A-Z])\b', text, re.IGNORECASE)
                 if m2_sec: current_seccion = m2_sec.group(2).upper()
-                
-            if not month_val:
-                m = re.search(r'(ENERO|FEBRERO|MARZO|ABRIL|MAYO|JUNIO|JULIO|AGOSTO|SETIEMBRE|SEPTIEMBRE|OCTUBRE|NOVIEMBRE|DICIEMBRE).*?(\d{4})', text, re.IGNORECASE)
-                if m:
-                    month_val = get_month_number(m.group(1).upper())
-                    year_val = int(m.group(2))
             
             lines = text.split('\n')
             for line in lines:
@@ -63,10 +62,44 @@ def extract_siagie_pdf(filepath):
                     if n_name and not any(s['norm'] == n_name for s in students):
                         students.append({'orig': name, 'norm': n_name, 'seccion': current_seccion})
 
+    # Detectar mes y año del texto completo del PDF
+    all_text = "\n".join(full_text_pages)
+    
     if not month_val:
-        today = datetime.datetime.now()
-        month_val = today.month
-        year_val = today.year
+        # Intento 1: Mes y año en la misma línea o cercanos (cruzando saltos de línea)
+        m = re.search(MONTH_PATTERN + r'[\s\S]{0,60}?(\d{4})', all_text, re.IGNORECASE)
+        if m:
+            month_val = get_month_number(m.group(1).upper())
+            year_val = int(m.group(2))
+    
+    if not month_val:
+        # Intento 2: Buscar mes y año por separado
+        m_month = re.search(MONTH_PATTERN, all_text, re.IGNORECASE)
+        m_year = re.search(r'\b(20[2-3]\d)\b', all_text)
+        if m_month:
+            month_val = get_month_number(m_month.group(1).upper())
+            year_val = int(m_year.group(1)) if m_year else datetime.datetime.now().year
+            print(f"[SIAGIE] Mes detectado (separado): {m_month.group(1)} {year_val}")
+    
+    if not month_val:
+        # Intento 3: Formato numérico (ej: "Mes: 05", "Periodo: 05/2026")
+        m_num = re.search(r'(?:Mes|Periodo|Período|MES)[\s:]*(\d{1,2})(?:[/\-\s]+(\d{4}))?', all_text, re.IGNORECASE)
+        if m_num:
+            month_num = int(m_num.group(1))
+            if 1 <= month_num <= 12:
+                month_val = month_num
+                year_val = int(m_num.group(2)) if m_num.group(2) else datetime.datetime.now().year
+                print(f"[SIAGIE] Mes detectado (numérico): {month_val} {year_val}")
+
+    if not month_val:
+        # Fallback: usar hora de Perú (UTC-5) en vez de UTC del servidor
+        import datetime as dt_module
+        utc_now = datetime.datetime.utcnow()
+        peru_offset = datetime.timedelta(hours=-5)
+        peru_now = utc_now + peru_offset
+        month_val = peru_now.month
+        year_val = peru_now.year
+        print(f"[SIAGIE] ADVERTENCIA: No se detectó mes en {os.path.basename(filepath)}. Usando mes actual (Perú): {month_val}/{year_val}")
 
     return {"nivel": nivel, "grado": grado, "month": month_val, "year": year_val, "students": students}
 
@@ -255,6 +288,7 @@ def process_uploads_logic(siagie_paths, att_paths):
         if not global_month and s_info["month"]:
             global_month = s_info["month"]
             global_year = s_info["year"]
+            print(f"[PROCESS] Mes/Año detectado del SIAGIE: {global_month}/{global_year}")
             
         for student in s_info["students"]:
             sec = student.get("seccion", "DESCONOCIDO")
@@ -266,10 +300,13 @@ def process_uploads_logic(siagie_paths, att_paths):
             student_norms.append(student['norm'])
             
     if not global_month:
-        import datetime
-        today = datetime.datetime.now()
-        global_month = today.month
-        global_year = today.year
+        # Fallback: usar hora de Perú (UTC-5)
+        utc_now = datetime.datetime.utcnow()
+        peru_offset = datetime.timedelta(hours=-5)
+        peru_now = utc_now + peru_offset
+        global_month = peru_now.month
+        global_year = peru_now.year
+        print(f"[PROCESS] ADVERTENCIA: Usando mes actual (Perú): {global_month}/{global_year}")
     
     all_att_data = {}
     all_extra_students = []
@@ -314,10 +351,20 @@ def process_uploads_logic(siagie_paths, att_paths):
                 "seccion": s['seccion']
             })
             
+    # Nombres de meses en español
+    MONTH_NAMES = {
+        1: "ENERO", 2: "FEBRERO", 3: "MARZO", 4: "ABRIL",
+        5: "MAYO", 6: "JUNIO", 7: "JULIO", 8: "AGOSTO",
+        9: "SETIEMBRE", 10: "OCTUBRE", 11: "NOVIEMBRE", 12: "DICIEMBRE"
+    }
+    
     return {
         "nivel": ", ".join(sorted(list(niveles))) if niveles else "DESCONOCIDO",
         "grado": ", ".join(sorted(list(grados))) if grados else "DESCONOCIDO",
         "seccion": ", ".join(sorted(list(secciones))) if secciones else "DESCONOCIDO",
+        "month": global_month,
+        "year": global_year,
+        "month_name": MONTH_NAMES.get(global_month, "DESCONOCIDO"),
         "days": days_headers,
         "results": results,
         "not_found": not_found,
