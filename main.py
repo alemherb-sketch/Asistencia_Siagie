@@ -1,12 +1,11 @@
-from fastapi import FastAPI, Query
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, Query, UploadFile, File
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 import os
 
 from excel_processor import process_attendance
 from upload_processor import process_uploads_logic
-from fastapi import FastAPI, Query, UploadFile, File
 from typing import List
 import shutil
 import tempfile
@@ -70,4 +69,7 @@ async def process_uploads(
     except Exception as e:
         error_detail = traceback.format_exc()
         print(f"[ERROR] process_uploads failed:\n{error_detail}")
-        return {"error": f"Error procesando archivos: {str(e)}"}
+        return JSONResponse(
+            status_code=500,
+            content={"error": f"Error procesando archivos: {str(e)}", "detail": str(e)}
+        )

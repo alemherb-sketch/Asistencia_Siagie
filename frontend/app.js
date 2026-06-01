@@ -67,8 +67,18 @@ document.addEventListener("DOMContentLoaded", () => {
             });
             
             if (!response.ok) {
-                const text = await response.text();
-                showError("Error en el servidor: " + text);
+                let errorText;
+                try {
+                    const errData = await response.json();
+                    errorText = errData.detail || errData.error || JSON.stringify(errData);
+                } catch {
+                    errorText = await response.text();
+                    // Si recibimos HTML (probable redirect del middleware), indicarlo
+                    if (errorText.includes('<!DOCTYPE') || errorText.includes('<html')) {
+                        errorText = `Error ${response.status}: La sesión puede haber expirado. Recargue la página e inicie sesión nuevamente.`;
+                    }
+                }
+                showError("Error en el servidor: " + errorText);
                 return;
             }
             

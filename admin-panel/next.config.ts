@@ -2,6 +2,9 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   serverExternalPackages: ['sqlite3', 'pg', 'bcryptjs'],
+  experimental: {
+    proxyTimeout: 300000, // 5 minutos para procesar muchos archivos
+  },
   async rewrites() {
     return [
       {
@@ -17,3 +20,4 @@ const nextConfig: NextConfig = {
 };
 
 export default nextConfig;
+
