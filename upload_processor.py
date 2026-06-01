@@ -227,9 +227,9 @@ def parse_generic_file(filepath, ext, student_norms):
             if table:
                 tables.append(table)
         except ImportError:
-            print(f"[WARN] Módulo image_processor no disponible. No se puede procesar {filepath}")
+            raise RuntimeError("Faltan librerías para leer imágenes (pytesseract, Pillow). Ejecute pip install pytesseract Pillow")
         except Exception as e:
-            print(f"Error procesando imagen {filepath}: {e}")
+            raise RuntimeError(f"Error procesando imagen: {str(e)}")
     else:
         try:
             df = pd.read_excel(filepath, header=None)
