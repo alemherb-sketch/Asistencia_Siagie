@@ -148,7 +148,7 @@ def process_table_data(table, student_norms):
             row_str = " ".join([str(c) for c in row if c])
             row_norm = normalize_name(row_str)
             
-            if len(row_norm) < 10 or ',' not in row_str:
+            if len(row_norm) < 10:
                 continue # Saltar filas que no parecen nombres
             
             best_match = None
@@ -214,7 +214,11 @@ def parse_generic_file(filepath, ext, student_norms):
     if ext == '.pdf':
         with pdfplumber.open(filepath) as pdf:
             for page in pdf.pages:
-                for table in page.extract_tables():
+                tables_extracted = page.extract_tables()
+                if not tables_extracted:
+                    # Fallback para PDFs sin bordes de tabla definidos (exportados de Excel)
+                    tables_extracted = page.extract_tables(table_settings={"vertical_strategy": "text", "horizontal_strategy": "text"})
+                for table in tables_extracted:
                     tables.append(table)
     elif ext in IMAGE_EXTENSIONS:
         try:
