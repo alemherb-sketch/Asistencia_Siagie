@@ -43,14 +43,14 @@ def extract_siagie_pdf(filepath):
                 if m: nivel = m.group(1).upper()
             
             if grado == "DESCONOCIDO":
-                m = re.search(r'\b(PRIMERO|SEGUNDO|TERCERO|CUARTO|QUINTO|SEXTO)\b', text, re.IGNORECASE)
+                m = re.search(r'\b(PRIMERO|SEGUNDO|TERCERO|CUARTO|QUINTO|SEXTO|\d+\s*AÑOS?)\b', text, re.IGNORECASE)
                 if m: grado = m.group(1).upper()
                 
             m_sec = re.search(r'(?:Secci[oó]n|Sec\.?)[\s:]*([A-Z])\b', text, re.IGNORECASE)
             if m_sec: 
                 current_seccion = m_sec.group(1).upper()
             else:
-                m2_sec = re.search(r'\b(PRIMERO|SEGUNDO|TERCERO|CUARTO|QUINTO|SEXTO)\s+([A-Z])\b', text, re.IGNORECASE)
+                m2_sec = re.search(r'\b(PRIMERO|SEGUNDO|TERCERO|CUARTO|QUINTO|SEXTO|\d+\s*AÑOS?)\s+([A-Z])\b', text, re.IGNORECASE)
                 if m2_sec: current_seccion = m2_sec.group(2).upper()
             
             lines = text.split('\n')
