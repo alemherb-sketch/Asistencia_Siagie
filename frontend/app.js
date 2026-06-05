@@ -49,21 +49,44 @@ document.addEventListener("DOMContentLoaded", () => {
         summaryContainer.classList.add("hidden");
         document.getElementById("filters-container").style.display = "none";
         loader.classList.remove("hidden");
-        
+
+        const nSiagie = siagieInput.files.length;
+        const nAtt = attInput.files.length;
+        let elapsed = 0;
+        loader.textContent = `Procesando ${nSiagie} PDF(s) SIAGIE + ${nAtt} archivo(s) de asistencia...`;
+
+        const timerInterval = setInterval(() => {
+            elapsed++;
+            const mins = Math.floor(elapsed / 60);
+            const secs = elapsed % 60;
+            const timeStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+            if (elapsed < 30) {
+                loader.textContent = `Procesando ${nSiagie} PDF(s) SIAGIE + ${nAtt} archivo(s)... (${timeStr})`;
+            } else if (elapsed < 90) {
+                loader.textContent = `Analizando y cruzando datos... (${timeStr})\nEsto puede tomar varios minutos con muchos archivos.`;
+            } else {
+                loader.textContent = `Aún procesando... (${timeStr}) — por favor espere, no cierre la página.`;
+            }
+        }, 1000);
+
+        const controller = new AbortController();
+        const abortTimeout = setTimeout(() => controller.abort(), 10 * 60 * 1000);
+
         try {
             const formData = new FormData();
-            
+
             for (let i = 0; i < siagieInput.files.length; i++) {
                 formData.append("siagie", siagieInput.files[i]);
             }
-            
+
             for (let i = 0; i < attInput.files.length; i++) {
                 formData.append("attendances", attInput.files[i]);
             }
 
             const response = await fetch('/asistencia/api/process_uploads', {
                 method: 'POST',
-                body: formData
+                body: formData,
+                signal: controller.signal
             });
             
             if (!response.ok) {
@@ -100,9 +123,18 @@ document.addEventListener("DOMContentLoaded", () => {
             applyFilters();
             
         } catch (err) {
-            showError("Error al procesar los archivos.");
+            if (err.name === 'AbortError') {
+                showError(`El procesamiento tardó más de 10 minutos. Intente con menos archivos a la vez o contacte al administrador.`);
+            } else if (err.name === 'TypeError') {
+                showError(`Error de conexión: el servidor no respondió (${err.message}). El servidor puede estar iniciando — espere 30 segundos y reintente.`);
+            } else {
+                showError(`Error al procesar los archivos: ${err.message || err}`);
+            }
             console.error(err);
         } finally {
+            clearInterval(timerInterval);
+            clearTimeout(abortTimeout);
+            loader.textContent = "Cargando datos...";
             loader.classList.add("hidden");
         }
     }

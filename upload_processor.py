@@ -5,6 +5,7 @@ import unicodedata
 import os
 import calendar
 import datetime
+import gc
 
 def normalize_name(name):
     if not isinstance(name, str): return ""
@@ -26,33 +27,70 @@ def extract_siagie_pdf(filepath):
     nivel, grado = "DESCONOCIDO", "DESCONOCIDO"
     month_val, year_val = None, None
     students = []
-    
+
     MONTH_PATTERN = r'(ENERO|FEBRERO|MARZO|ABRIL|MAYO|JUNIO|JULIO|AGOSTO|SETIEMBRE|SEPTIEMBRE|OCTUBRE|NOVIEMBRE|DICIEMBRE)'
-    
+
     with pdfplumber.open(filepath) as pdf:
         current_seccion = "DESCONOCIDO"
-        full_text_pages = []  # Guardar texto de todas las páginas para búsqueda de mes
-        
+        detected_month_name = None  # mes encontrado sin año cercano
+        detected_year = None        # año encontrado en cualquier página
+
         for page in pdf.pages:
             text = page.extract_text(x_tolerance=2, y_tolerance=3)
-            if not text: continue
-            full_text_pages.append(text)
-            
+            if not text:
+                continue
+
             if nivel == "DESCONOCIDO":
                 m = re.search(r'\b(INICIAL|PRIMARIA|SECUNDARIA)\b', text, re.IGNORECASE)
                 if m: nivel = m.group(1).upper()
-            
+
             if grado == "DESCONOCIDO":
                 m = re.search(r'\b(PRIMERO|SEGUNDO|TERCERO|CUARTO|QUINTO|SEXTO|\d+\s*AÑOS?)\b', text, re.IGNORECASE)
                 if m: grado = m.group(1).upper()
-                
+
             m_sec = re.search(r'(?:Secci[oó]n|Sec\.?)[\s:]*([A-Z])\b', text, re.IGNORECASE)
-            if m_sec: 
+            if m_sec:
                 current_seccion = m_sec.group(1).upper()
             else:
                 m2_sec = re.search(r'\b(PRIMERO|SEGUNDO|TERCERO|CUARTO|QUINTO|SEXTO|\d+\s*AÑOS?)\s+([A-Z])\b', text, re.IGNORECASE)
                 if m2_sec: current_seccion = m2_sec.group(2).upper()
-            
+
+            # Buscar mes/año por página (evita acumular texto de todo el PDF)
+            if not month_val:
+                # Intento 1: mes y año en la misma página
+                m = re.search(MONTH_PATTERN + r'[\s\S]{0,60}?(\d{4})', text, re.IGNORECASE)
+                if m:
+                    month_val = get_month_number(m.group(1).upper())
+                    year_val = int(m.group(2))
+                else:
+                    # Intento 2: mes y año por separado en esta página
+                    m_month = re.search(MONTH_PATTERN, text, re.IGNORECASE)
+                    m_year = re.search(r'\b(20[2-3]\d)\b', text)
+                    if m_month and m_year:
+                        month_val = get_month_number(m_month.group(1).upper())
+                        year_val = int(m_year.group(1))
+                        print(f"[SIAGIE] Mes detectado (separado): {m_month.group(1)} {year_val}")
+                    elif m_month:
+                        detected_month_name = m_month.group(1).upper()
+                    if m_year and not detected_year:
+                        detected_year = int(m_year.group(1))
+
+                    # Intento 3: formato numérico (ej: "Mes: 05")
+                    if not month_val:
+                        m_num = re.search(r'(?:Mes|Periodo|Período|MES)[\s:]*(\d{1,2})(?:[/\-\s]+(\d{4}))?', text, re.IGNORECASE)
+                        if m_num:
+                            month_num = int(m_num.group(1))
+                            if 1 <= month_num <= 12:
+                                month_val = month_num
+                                year_val = int(m_num.group(2)) if m_num.group(2) else detected_year
+                                print(f"[SIAGIE] Mes detectado (numérico): {month_val} {year_val}")
+            elif not detected_year:
+                m_year = re.search(r'\b(20[2-3]\d)\b', text)
+                if m_year:
+                    detected_year = int(m_year.group(1))
+                    if not year_val:
+                        year_val = detected_year
+
             lines = text.split('\n')
             for line in lines:
                 m = re.search(r'^\s*\d+\s+([A-ZÑÁÉÍÓÚ][A-ZÑÁÉÍÓÚ\s]+,\s*[A-ZÑÁÉÍÓÚ\s]+)', line)
@@ -62,41 +100,17 @@ def extract_siagie_pdf(filepath):
                     if n_name and not any(s['norm'] == n_name for s in students):
                         students.append({'orig': name, 'norm': n_name, 'seccion': current_seccion})
 
-    # Detectar mes y año del texto completo del PDF
-    all_text = "\n".join(full_text_pages)
-    
-    if not month_val:
-        # Intento 1: Mes y año en la misma línea o cercanos (cruzando saltos de línea)
-        m = re.search(MONTH_PATTERN + r'[\s\S]{0,60}?(\d{4})', all_text, re.IGNORECASE)
-        if m:
-            month_val = get_month_number(m.group(1).upper())
-            year_val = int(m.group(2))
-    
-    if not month_val:
-        # Intento 2: Buscar mes y año por separado
-        m_month = re.search(MONTH_PATTERN, all_text, re.IGNORECASE)
-        m_year = re.search(r'\b(20[2-3]\d)\b', all_text)
-        if m_month:
-            month_val = get_month_number(m_month.group(1).upper())
-            year_val = int(m_year.group(1)) if m_year else datetime.datetime.now().year
-            print(f"[SIAGIE] Mes detectado (separado): {m_month.group(1)} {year_val}")
-    
-    if not month_val:
-        # Intento 3: Formato numérico (ej: "Mes: 05", "Periodo: 05/2026")
-        m_num = re.search(r'(?:Mes|Periodo|Período|MES)[\s:]*(\d{1,2})(?:[/\-\s]+(\d{4}))?', all_text, re.IGNORECASE)
-        if m_num:
-            month_num = int(m_num.group(1))
-            if 1 <= month_num <= 12:
-                month_val = month_num
-                year_val = int(m_num.group(2)) if m_num.group(2) else datetime.datetime.now().year
-                print(f"[SIAGIE] Mes detectado (numérico): {month_val} {year_val}")
+    # Combinar mes/año detectados en distintas páginas
+    if not month_val and detected_month_name:
+        month_val = get_month_number(detected_month_name)
+        year_val = detected_year
+
+    if month_val and not year_val:
+        year_val = detected_year or datetime.datetime.now().year
 
     if not month_val:
-        # Fallback: usar hora de Perú (UTC-5) en vez de UTC del servidor
-        import datetime as dt_module
         utc_now = datetime.datetime.utcnow()
-        peru_offset = datetime.timedelta(hours=-5)
-        peru_now = utc_now + peru_offset
+        peru_now = utc_now + datetime.timedelta(hours=-5)
         month_val = peru_now.month
         year_val = peru_now.year
         print(f"[SIAGIE] ADVERTENCIA: No se detectó mes en {os.path.basename(filepath)}. Usando mes actual (Perú): {month_val}/{year_val}")
@@ -282,26 +296,35 @@ def process_uploads_logic(siagie_paths, att_paths):
     
     for s_path in siagie_paths:
         s_info = extract_siagie_pdf(s_path)
-        
+
         n = s_info.get("nivel", "DESCONOCIDO")
         g = s_info.get("grado", "DESCONOCIDO")
-        
+
         if n != "DESCONOCIDO": niveles.add(n)
         if g != "DESCONOCIDO": grados.add(g)
-        
+
         if not global_month and s_info["month"]:
             global_month = s_info["month"]
             global_year = s_info["year"]
             print(f"[PROCESS] Mes/Año detectado del SIAGIE: {global_month}/{global_year}")
-            
+
         for student in s_info["students"]:
             sec = student.get("seccion", "DESCONOCIDO")
             if sec != "DESCONOCIDO": secciones.add(sec)
-            
+
             student["nivel"] = n
             student["grado"] = g
             all_students.append(student)
             student_norms.append(student['norm'])
+
+        # Liberar memoria del PDF procesado
+        del s_info
+        gc.collect()
+        try:
+            import ctypes
+            ctypes.CDLL("libc.so.6").malloc_trim(0)
+        except Exception:
+            pass
             
     if not global_month:
         # Fallback: usar hora de Perú (UTC-5)
