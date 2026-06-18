@@ -5,6 +5,7 @@ import unicodedata
 import os
 import calendar
 import datetime
+import time
 import multiprocessing as mp
 
 def normalize_name(name):
@@ -288,6 +289,69 @@ def generate_month_days(year, month):
     return days
 
 # ═══════════════════════════════════════════════════════════════════════════════
+#  DIAGNÓSTICO DE RECURSOS (cgroup)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _read_file(path):
+    try:
+        with open(path) as f:
+            return f.read().strip()
+    except Exception:
+        return None
+
+
+def get_cpu_quota():
+    """CPUs efectivas asignadas al contenedor según cgroup (None = sin límite/desconocido).
+    Esto NO es os.cpu_count() (que reporta los núcleos del HOST, no la cuota del plan)."""
+    # cgroup v2
+    v2 = _read_file("/sys/fs/cgroup/cpu.max")
+    if v2:
+        parts = v2.split()
+        if len(parts) == 2 and parts[0] != "max":
+            try:
+                return round(int(parts[0]) / int(parts[1]), 2)
+            except Exception:
+                pass
+    # cgroup v1
+    quota = _read_file("/sys/fs/cgroup/cpu/cpu.cfs_quota_us")
+    period = _read_file("/sys/fs/cgroup/cpu/cpu.cfs_period_us")
+    try:
+        q, p = int(quota), int(period)
+        if q > 0 and p > 0:
+            return round(q / p, 2)
+    except Exception:
+        pass
+    return None
+
+
+def get_mem_limit_mb():
+    """Memoria máxima del contenedor en MB según cgroup (None = sin límite/desconocido)."""
+    for path in ("/sys/fs/cgroup/memory.max",
+                 "/sys/fs/cgroup/memory/memory.limit_in_bytes"):
+        v = _read_file(path)
+        if v and v != "max":
+            try:
+                mb = int(v) / (1024 * 1024)
+                if mb < 1_000_000:  # ignorar el centinela de "ilimitado"
+                    return round(mb)
+            except Exception:
+                pass
+    return None
+
+
+def system_summary():
+    """Resumen de recursos para diagnóstico. Revela si el plan está limitado en CPU."""
+    return {
+        "version": "parallel-v2-diag",
+        "host_cpu_count": os.cpu_count(),
+        "cgroup_cpu_quota": get_cpu_quota(),
+        "cgroup_mem_limit_mb": get_mem_limit_mb(),
+        "max_workers_env": os.environ.get("MAX_WORKERS", "(no set)"),
+        "resolved_workers_for_59": _resolve_workers(59),
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 #  PROCESAMIENTO EN PARALELO
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -345,12 +409,14 @@ def _run_parallel(func, items):
         return []
     workers = _resolve_workers(n)
     if workers <= 1 or n == 1:
+        print(f"[PERF] Modo SECUENCIAL ({n} items, workers={workers})")
         return [func(it) for it in items]
     try:
         with mp.Pool(processes=workers, maxtasksperchild=3) as pool:
+            print(f"[PERF] Pool PARALELO con {workers} procesos para {n} items")
             return pool.map(func, items)
     except Exception as e:
-        print(f"[PARALLEL] Pool no disponible ({e}); usando modo secuencial")
+        print(f"[PERF] Pool NO disponible ({e}); usando modo SECUENCIAL")
         return [func(it) for it in items]
 
 
@@ -367,7 +433,11 @@ def process_uploads_logic(siagie_paths, att_paths):
     
     # Fase 1: extraer todos los PDFs SIAGIE en paralelo (map preserva el orden,
     # por lo que el resultado es idéntico al procesamiento secuencial).
+    print(f"[PERF] === Recursos: {system_summary()} ===")
+    t_start = time.perf_counter()
     siagie_results = _run_parallel(_siagie_worker, siagie_paths)
+    t_phase1 = time.perf_counter() - t_start
+    print(f"[PERF] Fase 1 SIAGIE ({len(siagie_paths)} archivos): {t_phase1:.1f}s")
     for s_info in siagie_results:
         n = s_info.get("nivel", "DESCONOCIDO")
         g = s_info.get("grado", "DESCONOCIDO")
@@ -403,8 +473,11 @@ def process_uploads_logic(siagie_paths, att_paths):
     seen_extra = set()
 
     # Fase 2: parsear todos los archivos de asistencia en paralelo.
+    t2 = time.perf_counter()
     att_args = [(p, student_norms) for p in att_paths]
     att_results = _run_parallel(_attendance_worker, att_args)
+    t_phase2 = time.perf_counter() - t2
+    print(f"[PERF] Fase 2 asistencia ({len(att_paths)} archivos): {t_phase2:.1f}s")
     for att_data, extra_students in att_results:
         for s_norm, data in att_data.items():
             if s_norm not in all_att_data:
@@ -450,6 +523,10 @@ def process_uploads_logic(siagie_paths, att_paths):
         9: "SETIEMBRE", 10: "OCTUBRE", 11: "NOVIEMBRE", 12: "DICIEMBRE"
     }
     
+    t_total = time.perf_counter() - t_start
+    print(f"[PERF] TOTAL: {t_total:.1f}s "
+          f"(fase1 {t_phase1:.1f}s + fase2 {t_phase2:.1f}s)")
+
     return {
         "nivel": ", ".join(sorted(list(niveles))) if niveles else "DESCONOCIDO",
         "grado": ", ".join(sorted(list(grados))) if grados else "DESCONOCIDO",
@@ -460,5 +537,11 @@ def process_uploads_logic(siagie_paths, att_paths):
         "days": days_headers,
         "results": results,
         "not_found": not_found,
-        "extra_students": all_extra_students
+        "extra_students": all_extra_students,
+        "debug": {
+            "phase1_siagie_s": round(t_phase1, 1),
+            "phase2_attendance_s": round(t_phase2, 1),
+            "total_s": round(t_total, 1),
+            "system": system_summary(),
+        }
     }

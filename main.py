@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import os
 
 from excel_processor import process_attendance
-from upload_processor import process_uploads_logic
+from upload_processor import process_uploads_logic, system_summary
 from typing import List
 import shutil
 import tempfile
@@ -27,6 +27,10 @@ if not os.path.exists(frontend_dir):
 
 app.mount("/static", StaticFiles(directory=frontend_dir), name="static")
 
+@app.on_event("startup")
+def _log_resources():
+    print(f"[PERF] Recursos al iniciar: {system_summary()}")
+
 @app.get("/", response_class=HTMLResponse)
 def read_root():
     index_path = os.path.join(frontend_dir, "index.html")
@@ -34,6 +38,12 @@ def read_root():
         with open(index_path, "r", encoding="utf-8") as f:
             return f.read()
     return "<h1>Frontend not found</h1>"
+
+@app.get("/api/diag")
+def diag():
+    """Diagnóstico de recursos del contenedor. Confirma si el plan está
+    limitado en CPU (la causa más común de que el paralelismo no acelere)."""
+    return system_summary()
 
 @app.get("/api/attendance")
 def get_attendance(grado: str = Query("PRIMERO"), seccion: str = Query("A")):
