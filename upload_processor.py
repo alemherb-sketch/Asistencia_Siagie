@@ -5,7 +5,7 @@ import unicodedata
 import os
 import calendar
 import datetime
-import gc
+import multiprocessing as mp
 
 def normalize_name(name):
     if not isinstance(name, str): return ""
@@ -157,33 +157,37 @@ def process_table_data(table, student_norms):
             break
             
     if header_row_idx != -1:
+        # Precomputar las partes válidas de cada nombre UNA sola vez (en vez de
+        # recalcular .replace().split() por cada fila × cada alumno).
+        student_parts = []
+        for s_norm in student_norms:
+            valid_parts = [p for p in s_norm.replace(',', '').split() if len(p) > 2]
+            if valid_parts:
+                student_parts.append((s_norm, valid_parts))
+
         for r_idx in range(header_row_idx + 1, len(table)):
             row = table[r_idx]
             row_str = " ".join([str(c) for c in row if c])
             row_norm = normalize_name(row_str)
-            
+
             if len(row_norm) < 10:
                 continue # Saltar filas que no parecen nombres
-            
+
             best_match = None
-            
+
             # Pasada 1: Coincidencia exacta
             for s_norm in student_norms:
                 if s_norm in row_norm:
                     best_match = s_norm
                     break
-            
+
             # Pasada 2: Coincidencia parcial (fuzzy) al mejor postor
             if not best_match:
                 best_score = 0
-                for s_norm in student_norms:
-                    parts = s_norm.replace(',', '').split()
-                    valid_parts = [p for p in parts if len(p) > 2]
-                    if not valid_parts: continue
-                    
+                for s_norm, valid_parts in student_parts:
                     matches = sum(1 for p in valid_parts if p in row_norm)
                     score = matches / len(valid_parts)
-                    
+
                     # Exigir al menos 2 coincidencias y un score > 0.5
                     if matches >= 2 and score > 0.5 and score > best_score:
                         best_score = score
@@ -283,6 +287,73 @@ def generate_month_days(year, month):
         })
     return days
 
+# ═══════════════════════════════════════════════════════════════════════════════
+#  PROCESAMIENTO EN PARALELO
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _resolve_workers(n_items):
+    """
+    Número de procesos a usar. Configurable con la variable de entorno MAX_WORKERS
+    (útil en Render para ajustar según la RAM/CPU del plan contratado).
+    Por defecto usa los núcleos disponibles, con tope de 4 para no exceder memoria.
+    """
+    env = os.environ.get("MAX_WORKERS", "").strip()
+    if env:
+        try:
+            n = int(env)
+            if n > 0:
+                return min(n, n_items)
+        except ValueError:
+            pass
+    cpu = os.cpu_count() or 2
+    return max(1, min(cpu, 4, n_items))
+
+
+def _siagie_worker(path):
+    """Worker de proceso: extrae datos de un PDF SIAGIE. Tolerante a fallos por archivo."""
+    try:
+        return extract_siagie_pdf(path)
+    except Exception as e:
+        print(f"[SIAGIE] Error procesando {os.path.basename(path)}: {e}")
+        return {"nivel": "DESCONOCIDO", "grado": "DESCONOCIDO",
+                "month": None, "year": None, "students": []}
+
+
+def _attendance_worker(args):
+    """Worker de proceso: parsea un archivo de asistencia. Tolerante a fallos por archivo."""
+    path, student_norms = args
+    ext = os.path.splitext(path)[1].lower()
+    if ext not in ('.pdf', '.xls', '.xlsx') and ext not in IMAGE_EXTENSIONS:
+        return {}, []
+    try:
+        return parse_generic_file(path, ext, student_norms)
+    except Exception as e:
+        print(f"[ATT] Error procesando {os.path.basename(path)}: {e}")
+        return {}, []
+
+
+def _run_parallel(func, items):
+    """
+    Ejecuta `func` sobre `items` repartiendo el trabajo entre varios procesos.
+    Preserva el orden de entrada (resultados idénticos al modo secuencial).
+    maxtasksperchild recicla los procesos para liberar memoria periódicamente
+    (reemplaza el viejo gc.collect()/malloc_trim por archivo).
+    Si el pool no está disponible, cae a modo secuencial.
+    """
+    n = len(items)
+    if n == 0:
+        return []
+    workers = _resolve_workers(n)
+    if workers <= 1 or n == 1:
+        return [func(it) for it in items]
+    try:
+        with mp.Pool(processes=workers, maxtasksperchild=3) as pool:
+            return pool.map(func, items)
+    except Exception as e:
+        print(f"[PARALLEL] Pool no disponible ({e}); usando modo secuencial")
+        return [func(it) for it in items]
+
+
 def process_uploads_logic(siagie_paths, att_paths):
     all_students = []
     student_norms = []
@@ -294,21 +365,22 @@ def process_uploads_logic(siagie_paths, att_paths):
     grados = set()
     secciones = set()
     
-    for s_path in siagie_paths:
-        s_info = extract_siagie_pdf(s_path)
-
+    # Fase 1: extraer todos los PDFs SIAGIE en paralelo (map preserva el orden,
+    # por lo que el resultado es idéntico al procesamiento secuencial).
+    siagie_results = _run_parallel(_siagie_worker, siagie_paths)
+    for s_info in siagie_results:
         n = s_info.get("nivel", "DESCONOCIDO")
         g = s_info.get("grado", "DESCONOCIDO")
 
         if n != "DESCONOCIDO": niveles.add(n)
         if g != "DESCONOCIDO": grados.add(g)
 
-        if not global_month and s_info["month"]:
+        if not global_month and s_info.get("month"):
             global_month = s_info["month"]
             global_year = s_info["year"]
             print(f"[PROCESS] Mes/Año detectado del SIAGIE: {global_month}/{global_year}")
 
-        for student in s_info["students"]:
+        for student in s_info.get("students", []):
             sec = student.get("seccion", "DESCONOCIDO")
             if sec != "DESCONOCIDO": secciones.add(sec)
 
@@ -317,15 +389,6 @@ def process_uploads_logic(siagie_paths, att_paths):
             all_students.append(student)
             student_norms.append(student['norm'])
 
-        # Liberar memoria del PDF procesado
-        del s_info
-        gc.collect()
-        try:
-            import ctypes
-            ctypes.CDLL("libc.so.6").malloc_trim(0)
-        except Exception:
-            pass
-            
     if not global_month:
         # Fallback: usar hora de Perú (UTC-5)
         utc_now = datetime.datetime.utcnow()
@@ -337,20 +400,22 @@ def process_uploads_logic(siagie_paths, att_paths):
     
     all_att_data = {}
     all_extra_students = []
-    
-    for att_path in att_paths:
-        ext = os.path.splitext(att_path)[1].lower()
-        if ext in ['.pdf', '.xls', '.xlsx'] or ext in IMAGE_EXTENSIONS:
-            att_data, extra_students = parse_generic_file(att_path, ext, student_norms)
-            for s_norm, data in att_data.items():
-                if s_norm not in all_att_data:
-                    all_att_data[s_norm] = {}
-                all_att_data[s_norm].update(data)
-                
-            for ex in extra_students:
-                if not any(s['name'] == ex['name'] for s in all_extra_students):
-                    all_extra_students.append(ex)
-                
+    seen_extra = set()
+
+    # Fase 2: parsear todos los archivos de asistencia en paralelo.
+    att_args = [(p, student_norms) for p in att_paths]
+    att_results = _run_parallel(_attendance_worker, att_args)
+    for att_data, extra_students in att_results:
+        for s_norm, data in att_data.items():
+            if s_norm not in all_att_data:
+                all_att_data[s_norm] = {}
+            all_att_data[s_norm].update(data)
+
+        for ex in extra_students:
+            if ex['name'] not in seen_extra:
+                seen_extra.add(ex['name'])
+                all_extra_students.append(ex)
+
     days_headers = generate_month_days(global_year, global_month)
     
     results = []
