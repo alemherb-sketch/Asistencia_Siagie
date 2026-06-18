@@ -5,6 +5,7 @@ xlrd
 openpyxl
 python-multipart
 pdfplumber
+PyMuPDF
 pytesseract
 Pillow
 opencv-python-headless
