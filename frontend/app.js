@@ -52,40 +52,63 @@ document.addEventListener("DOMContentLoaded", () => {
 
         const nSiagie = siagieInput.files.length;
         const nAtt = attInput.files.length;
+        const totalFiles = nSiagie + nAtt;
         let elapsed = 0;
-        loader.textContent = `Procesando ${nSiagie} PDF(s) SIAGIE + ${nAtt} archivo(s) de asistencia...`;
+        let loaderMsg = `Subiendo archivos 0/${totalFiles}...`;
+        loader.textContent = loaderMsg;
 
         const timerInterval = setInterval(() => {
             elapsed++;
             const mins = Math.floor(elapsed / 60);
             const secs = elapsed % 60;
             const timeStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
-            if (elapsed < 30) {
-                loader.textContent = `Procesando ${nSiagie} PDF(s) SIAGIE + ${nAtt} archivo(s)... (${timeStr})`;
-            } else if (elapsed < 90) {
-                loader.textContent = `Analizando y cruzando datos... (${timeStr})\nEsto puede tomar varios minutos con muchos archivos.`;
-            } else {
-                loader.textContent = `Aún procesando... (${timeStr}) — por favor espere, no cierre la página.`;
-            }
+            loader.textContent = `${loaderMsg} (${timeStr})`;
         }, 1000);
 
         const controller = new AbortController();
         const abortTimeout = setTimeout(() => controller.abort(), 25 * 60 * 1000);
 
         try {
-            const formData = new FormData();
+            // Subida por PARTES: en vez de mandar los 118 archivos en una sola
+            // petición gigante (que satura el proxy/memoria del servidor), se
+            // envían en tandas pequeñas que se acumulan en el servidor; luego se
+            // procesan todos juntos (resultado idéntico, con progreso y sin timeout).
+            const sessionId = (window.crypto && crypto.randomUUID)
+                ? crypto.randomUUID()
+                : 'sess-' + Date.now() + '-' + Math.random().toString(36).slice(2);
+            const CHUNK = 6;
+            let sentFiles = 0;
 
-            for (let i = 0; i < siagieInput.files.length; i++) {
-                formData.append("siagie", siagieInput.files[i]);
+            async function uploadChunks(kind, fileList) {
+                for (let i = 0; i < fileList.length; i += CHUNK) {
+                    const fd = new FormData();
+                    fd.append("session", sessionId);
+                    fd.append("kind", kind);
+                    const end = Math.min(i + CHUNK, fileList.length);
+                    for (let j = i; j < end; j++) fd.append("files", fileList[j]);
+
+                    const resp = await fetch('/asistencia/api/upload_chunk', {
+                        method: 'POST', body: fd, signal: controller.signal
+                    });
+                    if (!resp.ok) {
+                        let msg = `Falló la subida de archivos (HTTP ${resp.status})`;
+                        try { const e = await resp.json(); if (e.error) msg = e.error; } catch {}
+                        throw new Error(msg);
+                    }
+                    sentFiles += (end - i);
+                    loaderMsg = `Subiendo archivos ${sentFiles}/${totalFiles}...`;
+                }
             }
 
-            for (let i = 0; i < attInput.files.length; i++) {
-                formData.append("attendances", attInput.files[i]);
-            }
+            await uploadChunks("siagie", siagieInput.files);
+            await uploadChunks("attendances", attInput.files);
 
-            const response = await fetch('/asistencia/api/process_uploads', {
+            loaderMsg = "Procesando datos en el servidor...";
+            const sessionForm = new FormData();
+            sessionForm.append("session", sessionId);
+            const response = await fetch('/asistencia/api/process_session', {
                 method: 'POST',
-                body: formData,
+                body: sessionForm,
                 signal: controller.signal
             });
             
