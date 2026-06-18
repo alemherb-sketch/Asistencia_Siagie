@@ -357,9 +357,10 @@ def system_summary():
 
 def _resolve_workers(n_items):
     """
-    Número de procesos a usar. Configurable con la variable de entorno MAX_WORKERS
-    (útil en Render para ajustar según la RAM/CPU del plan contratado).
-    Por defecto usa los núcleos disponibles, con tope de 4 para no exceder memoria.
+    Número de procesos a usar. Configurable con la variable de entorno MAX_WORKERS.
+    Por defecto se limita a los CPU REALES del contenedor (cuota cgroup), NO a los
+    núcleos del host: en planes con fracción de CPU (ej. 0.5) lanzar varios procesos
+    no acelera nada y solo agrega sobrecarga de contexto + presión de memoria.
     """
     env = os.environ.get("MAX_WORKERS", "").strip()
     if env:
@@ -369,8 +370,12 @@ def _resolve_workers(n_items):
                 return min(n, n_items)
         except ValueError:
             pass
-    cpu = os.cpu_count() or 2
-    return max(1, min(cpu, 4, n_items))
+    quota = get_cpu_quota()
+    if quota is not None:
+        effective = max(1, int(quota))   # 0.5 CPU -> 1 (secuencial, sin sobrecarga)
+    else:
+        effective = os.cpu_count() or 2
+    return max(1, min(effective, 4, n_items))
 
 
 def _siagie_worker(path):
