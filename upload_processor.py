@@ -379,9 +379,16 @@ def get_mem_limit_mb():
 
 
 def system_summary():
-    """Resumen de recursos para diagnóstico. Revela si el plan está limitado en CPU."""
+    """Resumen de recursos para diagnóstico. Revela si el plan está limitado en CPU
+    y si PyMuPDF (el motor rápido) está realmente instalado en el servidor."""
+    try:
+        import fitz  # noqa: F401
+        fitz_ok = True
+    except Exception:
+        fitz_ok = False
     return {
-        "version": "parallel-v2-diag",
+        "version": "v3-pymupdf",
+        "fitz_available": fitz_ok,
         "host_cpu_count": os.cpu_count(),
         "cgroup_cpu_quota": get_cpu_quota(),
         "cgroup_mem_limit_mb": get_mem_limit_mb(),

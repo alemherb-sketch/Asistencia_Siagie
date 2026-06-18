@@ -344,7 +344,12 @@ document.addEventListener("DOMContentLoaded", () => {
         const total = foundCount + notFoundCount;
         
         totalStudentsSpan.textContent = total;
-        studentDetailsSpan.textContent = `(${foundCount} encontrados, ${notFoundCount} no encontrados)`;
+        let timingStr = "";
+        if (globalData && globalData.debug) {
+            const d = globalData.debug;
+            timingStr = ` | ⏱ ${d.total_s}s (SIAGIE ${d.phase1_siagie_s}s · asistencia ${d.phase2_attendance_s}s)`;
+        }
+        studentDetailsSpan.textContent = `(${foundCount} encontrados, ${notFoundCount} no encontrados)${timingStr}`;
         summaryContainer.classList.remove("hidden");
     }
 });
