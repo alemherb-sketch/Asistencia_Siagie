@@ -70,7 +70,7 @@ document.addEventListener("DOMContentLoaded", () => {
         }, 1000);
 
         const controller = new AbortController();
-        const abortTimeout = setTimeout(() => controller.abort(), 10 * 60 * 1000);
+        const abortTimeout = setTimeout(() => controller.abort(), 25 * 60 * 1000);
 
         try {
             const formData = new FormData();
@@ -124,7 +124,7 @@ document.addEventListener("DOMContentLoaded", () => {
             
         } catch (err) {
             if (err.name === 'AbortError') {
-                showError(`El procesamiento tardó más de 10 minutos. Intente con menos archivos a la vez o contacte al administrador.`);
+                showError(`Tardó más de 25 minutos. La mayor parte es la SUBIDA de los archivos a internet, no el procesamiento. Suba menos archivos a la vez (por ejemplo, un grado a la vez) o use una conexión más rápida.`);
             } else if (err.name === 'TypeError') {
                 showError(`Error de conexión: el servidor no respondió (${err.message}). El servidor puede estar iniciando — espere 30 segundos y reintente.`);
             } else {
